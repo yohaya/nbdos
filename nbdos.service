@@ -1,0 +1,26 @@
+[Unit]
+Description=NBD Server backed by S3 object storage (nbdos)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nbdos --config /etc/nbdos/config.yaml
+Restart=on-failure
+RestartSec=5
+User=nbdos
+Group=nbdos
+
+# Allow binding to port 10809
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Journal logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nbdos
+
+# Increase open file limits for many concurrent connections
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,121 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: nbdos
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: nbdos
+            cross: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Install cross (for cross-compilation)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: "!matrix.cross"
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p bin/${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} \
+             bin/${{ matrix.target }}/${{ matrix.binary }}
+          # Print size for reference
+          ls -lh bin/${{ matrix.target }}/${{ matrix.binary }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nbdos-${{ matrix.target }}
+          path: bin/${{ matrix.target }}/${{ matrix.binary }}
+          retention-days: 90
+
+  # Commit binaries back to bin/ on pushes to main/master
+  commit-bins:
+    name: Commit binaries to bin/
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: bin/
+          merge-multiple: false
+
+      # download-artifact v4 creates subdirs named after the artifact;
+      # flatten them so bin/ contains target-named subdirs with the binary inside.
+      - name: Flatten artifact directories
+        run: |
+          cd bin
+          for dir in nbdos-*/; do
+            target="${dir#nbdos-}"
+            target="${target%/}"
+            mkdir -p "$target"
+            mv "$dir"/* "$target/" 2>/dev/null || true
+            rm -rf "$dir"
+          done
+          find . -type f | sort
+
+      - name: Commit & push binaries
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/
+          if git diff --cached --quiet; then
+            echo "No binary changes to commit."
+          else
+            git commit -m "ci: update binaries [skip ci]"
+            git push
+          fi

@@ -1,0 +1,66 @@
+# nbdos — NBD server backed by S3-compatible object storage
+# Copy this to config.yaml and adjust values.
+
+nbd:
+  listen_addr: "0.0.0.0"
+  listen_port: 10809
+
+s3:
+  # For AWS S3, leave endpoint unset.
+  # For MinIO / Ceph RGW / other S3-compatible: set the endpoint URL.
+  endpoint: "http://minio.example.com:9000"
+  region: "us-east-1"
+  bucket: "nbdos"
+
+  # Credentials (optional: fall back to env vars or IAM role)
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+
+  # Path-style URLs: required for MinIO and most S3-compatible stores
+  force_path_style: true
+
+  # Write timeout per attempt (seconds). Very slow stores may need 300+.
+  write_timeout_secs: 120
+  # Read timeout per attempt (seconds).
+  read_timeout_secs: 60
+
+  # Retry settings. max_retries: 4294967295 means retry forever.
+  max_retries: 4294967295
+  retry_delay_ms: 500
+  max_retry_delay_ms: 30000
+
+  # Concurrent S3 upload workers per device
+  upload_workers: 8
+
+cache:
+  # L1 in-memory cache (bytes). Example: 512 MB = 536870912
+  l1_max_bytes: 536870912
+
+  # L2 disk cache directory on fast local storage (SSD/NVMe).
+  # Stores dirty blocks until they are persisted to S3.
+  # Comment out to disable L2 (writes go directly to L1 only).
+  l2_dir: "/var/cache/nbdos"
+
+  # Maximum L2 disk usage in bytes. Comment out for unlimited.
+  # l2_max_bytes: 107374182400   # 100 GB
+
+devices:
+  - name: "vol0"
+    # Total device size in bytes. Example: 100 GB = 107374182400
+    size_bytes: 107374182400
+    # Block granularity for S3 objects (bytes). 4096 is standard.
+    block_size: 4096
+    # S3 key prefix for this device's blocks
+    s3_prefix: "volumes/vol0"
+    read_only: false
+    # Seconds to wait for an S3 write before acknowledging NBD client.
+    # 0 = write-behind: acknowledge immediately (data safe in L2 cache).
+    write_ack_timeout_secs: 0
+
+  # Add more devices as needed:
+  # - name: "vol1"
+  #   size_bytes: 53687091200   # 50 GB
+  #   block_size: 4096
+  #   s3_prefix: "volumes/vol1"
+  #   read_only: false
+  #   write_ack_timeout_secs: 0
